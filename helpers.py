@@ -609,6 +609,7 @@ def prepare_classification_report(y_true, y_pred, target_names):
 
 
 def dump_params(params, file_path):
+    """Dump parameters to a JSON file."""
     with open(file_path, "w") as f:
         json.dump(params, f, indent=4)
 

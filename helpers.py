@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 import seaborn as sns
 from scipy import stats
+from scipy.stats import chi2_contingency
+import statsmodels.api as sm
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from sklearn.linear_model import LogisticRegressionCV
@@ -26,6 +28,8 @@ from sklearn.metrics import (
 from sklearn.ensemble import RandomForestClassifier
 from imblearn.metrics import geometric_mean_score
 from statsmodels.stats.outliers_influence import variance_inflation_factor
+
+import logging
 
 
 def plot_data(dataframe):
@@ -91,6 +95,67 @@ def display_outlier_percentage(df):
     )
 
     return result_df
+
+
+def backward_elimination(data, target, significance_level=0.05):
+    """
+    Perform backward elimination on a dataset to select features for linear regression.
+    """
+    # Ensure that all data is numeric
+    numeric_data = data.select_dtypes(include=[np.number])
+
+    # Separate the features from the target
+    features = numeric_data.drop(target, axis=1).columns.tolist()
+
+    while len(features) > 0:
+        features_with_constant = sm.add_constant(numeric_data[features])
+        p_values = (
+            sm.OLS(numeric_data[target], features_with_constant).fit().pvalues[1:]
+        )  # Ignore the constant's p-value
+
+        max_p_value = p_values.max()  # Get the feature with the max p-value
+        if max_p_value > significance_level:
+            excluded_feature = p_values.idxmax()
+            features.remove(excluded_feature)
+        else:
+            break
+
+    selected_features = features
+    model = sm.OLS(
+        numeric_data[target], sm.add_constant(numeric_data[selected_features])
+    ).fit()
+
+    return model, selected_features
+
+
+def perform_chi_square_test(df, column_x, column_y, alpha=0.05):
+    """
+    Perform chi-square test of independence between two categorical variables.
+    """
+    try:
+        # Check if the columns exist in the DataFrame
+        if column_x not in df.columns or column_y not in df.columns:
+            raise ValueError(
+                f"Columns '{column_x}' or '{column_y}' not found in the dataframe."
+            )
+
+        # Create a contingency table
+        contingency_table = pd.crosstab(df[column_x], df[column_y])
+
+        # Perform the chi-square test
+        chi2, p, dof, expected = chi2_contingency(contingency_table)
+
+        # Check if the results are significant
+        if p < alpha:
+            logging.info(
+                f"p-value: {p} : The difference in proportions between {column_x} and {column_y} is statistically significant."
+            )
+        else:
+            logging.info(
+                f"No significant difference in proportions between {column_x} and {column_y} was found."
+            )
+    except Exception as e:
+        logging.error(f"Error performing chi-square test: {e}")
 
 
 def sumstatsfmt(df):
@@ -376,37 +441,23 @@ def logistic_regression_assumptions(df, target):
     check_sample_size(y)
 
 
-def prepare_data(df, target, lr=True, test_size=0.20, random_state=42):
+def prepare_data(df, target, test_size=0.20, random_state=42):
     """
     Prepares training and test datasets for modeling.
     """
     # Select features and target
-    if lr == True:
-        X = df[
-            [
-                "satisfaction_level",
-                "last_evaluation",
-                "number_project",
-                "average_monthly_hours",
-                "tenure",
-                "work_accident",
-                "promotion_last_5years",
-                "salary",
-                "overtime",
-                "department",
-            ]
+    X = df[
+        [
+            "satisfaction_level",
+            "last_evaluation",
+            "work_accident",
+            "promotion_last_5years",
+            "salary",
+            "overtime",
+            "department",
         ]
-    else:
-        X = df[
-            [
-                "satisfaction_level",
-                "tenure",
-                "work_accident",
-                "promotion_last_5years",
-                "department",
-                "salary",
-            ]
-        ]
+    ]
+
     y = df[target]
 
     # Encode categorical variables

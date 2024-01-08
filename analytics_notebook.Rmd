@@ -1,0 +1,885 @@
+# HR Analytics
+
+### Data
+
+satisfaction_level \| Employee-reported job satisfaction level last_evaluation \| Score of employee's last performance review number_project \| Number of projects employee contributes to\| average_monthly_hours\| Average number of hours employee worked per month\| time_spend_company \| How long the employee has been with the company (years) Work_accident \| Whether or not the employee experienced an accident while at work left \| Whether or not the employee left the company promotion_last_5years \| Whether or not the employee was promoted in the last 5 years Department \| The employee's department salary_usd \| The employee's salary (U.S. dollars)
+
+## Main purpose of this notebook is to be able to predict employee attrition and fair compensation value.
+
+### Contents:
+
+-EDA and visualizations
+
+-Correlation analysis
+
+-Modelling
+
+-Linear Regression for predicting salary
+
+-Tree based classifiers for predicting attrition
+
+-Fine-tune best model
+
+-Feature importance
+
+\- Predicting current employees at risk of leaving
+
+\- Conclusions
+
+## Read the data
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(ggplot2)
+### Load the data
+data <- read.csv("analytics_data.csv")
+data <- data %>% select(-X)
+
+### Examine the first few rows of the data
+head(data)
+```
+
+## 3.1. Descriptive analysis
+
+```{r}
+### Summary statistics
+summary(data)
+```
+
+```{r}
+### Check for missing values
+sum(is.na(data))
+```
+
+```{r}
+# Department-wise employee count
+table(data$department)
+```
+
+## 3.2 Visualizing the data
+
+```{r}
+### Visualizations
+plot_distribution <- function(data, col) {
+  if (is.numeric(data[[col]])) {
+    # Numeric variable: Histogram
+    ggplot(data, aes_string(col)) +
+      geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+      labs(title = paste("Histogram of", col), x = col, y = "Count") +
+      theme_minimal()
+  } else {
+    # Categorical variable: Bar plot
+    ggplot(data, aes_string(col)) +
+      geom_bar(fill = "coral", color = "black") +
+      labs(title = paste("Bar Plot of", col), x = col, y = "Count") +
+      theme_minimal()
+  }
+}
+
+# Apply the function to each column
+for (col in names(data)) {
+  print(plot_distribution(data, col))
+}
+```
+
+```{r}
+data$number_project <- as.factor(data$number_project) 
+data$tenure <- as.factor(data$tenure) 
+data$tenure <- as.factor(data$tenure) 
+data$work_accident <- as.factor(data$work_accident) 
+data$left <- as.factor(data$left) 
+data$promotion_last_5years <- as.factor(data$promotion_last_5years) 
+data$department <- as.factor(data$department) 
+
+```
+
+## 3.3 Detecting outliers
+
+```{r echo=TRUE, message=FALSE}
+#### 3.3 Identification and Handling of Outliers
+
+boxplot(data$salary_usd, main = "Boxplot for salary")
+```
+
+**Percentage of outliers**
+
+```{r}
+outliers_salary_usd <- boxplot.stats(data$salary_usd)$out
+
+# Identify numerical columns
+numerical_cols <- sapply(data, is.numeric)
+
+# Initialize a dataframe to store the results
+outliers_df <- data.frame(Variable = character(), 
+                          NumOutliers = integer(), 
+                          PercentOutliers = numeric(), 
+                          stringsAsFactors = FALSE)
+
+# Loop over numerical columns to calculate outliers
+for (col in names(data)[numerical_cols]) {
+  # Calculate IQR
+  Q1 <- quantile(data[[col]], 0.25)
+  Q3 <- quantile(data[[col]], 0.75)
+  IQR <- Q3 - Q1
+  
+  # Define outliers
+  outliers <- data[[col]] < (Q1 - 1.5 * IQR) | data[[col]] > (Q3 + 1.5 * IQR)
+  
+  # Calculate number and percentage of outliers
+  num_outliers <- sum(outliers)
+  percent_outliers <- (num_outliers / nrow(data)) * 100
+  
+  # Add results to the dataframe
+  outliers_df <- rbind(outliers_df, data.frame(Variable = col, 
+                                               NumOutliers = num_outliers, 
+                                               PercentOutliers = percent_outliers))
+}
+
+# Display the dataframe sorted
+outliers_df[order(-outliers_df$NumOutliers), ]
+```
+
+```{r}
+# removing rows where salary is an outlier
+data <- data[!data$salary_usd %in% outliers_salary_usd, ]
+nrow(data)
+```
+
+```{r}
+quantiles <- quantile(data$salary_usd, probs = c(0, 1/3, 2/3, 1))
+data$salary_category <- cut(data$salary_usd, breaks = quantiles, labels = c("0", "1", "2"), include.lowest = TRUE)
+```
+
+## 4. Statistical analysis of categorical variables
+
+```{r}
+categorical_vars <- sapply(data, function(x) is.factor(x) || is.character(x))
+
+# Names of the categorical variables
+cat_var_names <- names(categorical_vars[categorical_vars])
+cat_var_names
+```
+
+4.1.1 Marginal Frequency
+
+```{r}
+freq_marginal <- table(data$number_project)
+print("Marginal Frequency for number_project")
+print(freq_marginal)
+
+freq_marginal <- table(data$tenure)
+print("Marginal Frequency for tenure")
+print(freq_marginal)
+
+freq_marginal <- table(data$work_accident)
+print("Marginal Frequency for work_accident")
+print(freq_marginal)
+
+freq_marginal <- table(data$left)
+print("Marginal Frequency for left")
+print(freq_marginal)
+
+freq_marginal <- table(data$promotion_last_5years)
+print("Marginal Frequency for promotion_last_5years")
+print(freq_marginal)
+
+freq_marginal <- table(data$department)
+print("Marginal Frequency for Department")
+print(freq_marginal)
+
+freq_marginal <- table(data$salary_category)
+print("Marginal Frequency for salary_category")
+print(freq_marginal)
+```
+
+4.1.2 Conditional Frequency
+
+```{r}
+freq_conditional <- prop.table(table(data$number_project, data$left), margin = 1)
+print("Conditional Frequency of Left given number_project")
+print(freq_conditional)
+
+freq_conditional <- prop.table(table(data$department, data$left), margin = 1)
+print("Conditional Frequency of Left given Department")
+print(freq_conditional)
+
+freq_conditional <- prop.table(table(data$tenure, data$left), margin = 1)
+print("Conditional Frequency of Left given tenure")
+print(freq_conditional)
+
+freq_conditional <- prop.table(table(data$promotion_last_5years, data$left), margin = 1)
+print("Conditional Frequency of Left given promotion_last_5years")
+print(freq_conditional)
+
+freq_conditional <- prop.table(table(data$work_accident, data$left), margin = 1)
+print("Conditional Frequency of Left given work_accident")
+print(freq_conditional)
+
+freq_conditional <- prop.table(table(data$salary_category, data$left), margin = 1)
+print("Conditional Frequency of Left given salary_category")
+print(freq_conditional)
+
+```
+
+4.1.3 Partial Frequency
+
+```{r}
+freq_partial <- table(data$number_project, data$left)
+print("Partial Frequencies for number_project and Left")
+print(freq_partial)
+
+freq_partial <- table(data$department, data$left)
+print("Partial Frequencies for Department and Left")
+print(freq_partial)
+
+freq_partial <- table(data$tenure, data$left)
+print("Partial Frequencies for tenure and Left")
+print(freq_partial)
+
+freq_partial <- table(data$promotion_last_5years, data$left)
+print("Partial Frequencies for promotion_last_5years and Left")
+print(freq_partial)
+
+freq_partial <- table(data$work_accident, data$left)
+print("Partial Frequencies for work_accident and Left")
+print(freq_partial)
+
+freq_partial <- table(data$salary_category, data$left)
+print("Partial Frequencies for salary_category and Left")
+print(freq_partial)
+
+```
+
+### **4.2. Association Analysis**
+
+```{r}
+# Chi-Square Test of Independence
+chi_square_result <- chisq.test(data$number_project , data$left)
+print("Chi-Square Test of Independence between number_project  and Left")
+print(chi_square_result)
+
+chi_square_result <- chisq.test(data$department, data$left)
+print("Chi-Square Test of Independence between Department and Left")
+print(chi_square_result)
+
+chi_square_result <- chisq.test(data$tenure, data$left)
+print("Chi-Square Test of Independence between tenure and Left")
+print(chi_square_result)
+
+chi_square_result <- chisq.test(data$promotion_last_5years , data$left)
+print("Chi-Square Test of Independence between promotion_last_5years and Left")
+print(chi_square_result)
+
+chi_square_result <- chisq.test(data$work_accident, data$left)
+print("Chi-Square Test of Independence between work_accident and Left")
+print(chi_square_result)
+
+chi_square_result <- chisq.test(data$salary_category, data$left)
+print("Chi-Square Test of Independence between salary_category and Left")
+print(chi_square_result)
+
+```
+
+All the variables tested show a statistically significant association with employee attrition. The strength of the association, as suggested by the Chi-square statistic, is particularly strong for the number of projects, tenure, and salary category.
+
+### **4.3. Concordance Analysis**
+
+```{r}
+library(irr)
+kappa_result <- kappa2(data[c("number_project", "left")])
+print("Kappa Statistic for Concordance between number_project and Left")
+print(kappa_result)
+
+kappa_result <- kappa2(data[c("department", "left")])
+print("Kappa Statistic for Concordance between Department and Left")
+print(kappa_result)
+
+kappa_result <- kappa2(data[c("tenure", "left")])
+print("Kappa Statistic for Concordance between tenure and Left")
+print(kappa_result)
+
+kappa_result <- kappa2(data[c("promotion_last_5years", "left")])
+print("Kappa Statistic for Concordance between promotion_last_5years and Left")
+print(kappa_result)
+
+kappa_result <- kappa2(data[c("work_accident", "left")])
+print("Kappa Statistic for Concordance between work_accident and Left")
+print(kappa_result)
+
+kappa_result <- kappa2(data[c("salary_category", "left")])
+print("Kappa Statistic for Concordance between salary_category and Left")
+print(kappa_result)
+```
+
+-   **Number of Projects, Department, Tenure**: The Kappa statistics are 0, indicating no agreement between these variables and attrition (**`Left`**) beyond what would be expected by chance. However, the **`NaN`** values for z and p-value suggest there may be computational issues, likely due to perfect balance or lack of variability in the data.
+
+-   **Promotion in the Last 5 Years**: The negative Kappa value (-0.0299) indicates a slight but significant systematic disagreement with attrition. This suggests that promotions within the last five years might be occurring in a pattern that is inversely related to attrition, or less commonly than expected by chance among those who left.
+
+-   **Work Accident**: A more substantial negative Kappa value (-0.147) implies a stronger and significant systematic disagreement with attrition. This may suggest that work accidents are associated with staying rather than leaving, contrary to what might be expected.
+
+-   **Salary Category**: The negative Kappa value (-0.0945) also indicates a significant systematic disagreement with attrition, suggesting that salary categories are distributed among those who left in a way that is different from chance expectation.
+
+# 5. Estimation and testing of Means
+
+**5.1 Confidence Interval**
+
+```{r}
+mean_estimate <- t.test(data$salary_usd)
+# Print the confidence interval
+print(mean_estimate$conf.int)
+
+```
+
+With a 95% confidence we can estimate the mean salary is covered by the [38607.82, 38761.07] interval
+
+**5.2 Testing of population means**
+
+```{r}
+t_test_result <- t.test(data$salary_usd, mu = 40000)
+
+# Print the test result
+print(t_test_result)
+
+```
+
+H0: Average salary is not significantly different from 40k
+
+H1: Average salary is significantly different from 40k
+
+p-value \< 2.2e-16, therefore we reject the null hypothesis (H0) that the average salary is not significantly different from 40k. There is strong evidence to suggest that the average salary is significantly different from 40k."
+
+In other words, the data suggests that the average salary is not equal to 40k, and there is a statistically significant difference.
+
+#### 5.2.2 Testing the Difference Between Two Means
+
+```{r}
+t_test_independent <- t.test(salary_usd ~ left, data = data)
+
+# Print the test result
+print(t_test_independent)
+
+```
+
+H0: The true difference in means between group 0 and group 1 is equal to 0.
+
+H1: The true difference in means between group 0 and group 1 is not equal to 0.
+
+p-value \< 2.2e-16, we reject the null hypothesis (H0). There is strong evidence to suggest that the true difference in means between group 0 and group 1 is not equal to 0, indicating a statistically significant difference in average salaries between the two groups. Group 1's average salary is significantly higher than that of group 0.
+
+**5.2.3 Testing the difference between 3 or more means**
+
+```{r}
+anova_result <- aov(salary_usd ~ department, data = data)
+summary(anova_result)
+
+if (summary(anova_result)[[1]][["Pr(>F)"]][1] < 0.05) {
+  TukeyHSD(anova_result)
+}
+```
+
+H0: There is no significant difference in mean salaries across different departments.
+
+H1: There is a significant difference in mean salaries across different departments.
+
+Conclusion: The analysis of variance (ANOVA) indicates a statistically significant difference in mean salaries across different departments (p-value \< 0.05). Post-hoc Tukey HSD tests reveal specific pairwise differences between departments, highlighting which departments have significantly different average salaries compared to others.
+
+# **6. Regression and correlation analysis**
+
+## 6. Correlation matrix
+
+```{r}
+library(ggplot2)
+library(reshape2)
+
+data$number_project <- as.numeric(data$number_project) 
+data$tenure <- as.numeric(data$tenure) 
+data$tenure <- as.numeric(data$tenure) 
+data$work_accident <- as.numeric(data$work_accident) 
+data$left <- as.numeric(as.character(data$left))
+data$promotion_last_5years <- as.numeric(data$promotion_last_5years) 
+data$department <- as.numeric(data$department) 
+
+numeric_and_factor_data <- data[sapply(data, is.numeric)]
+
+cor_matrix <- cor(numeric_and_factor_data, use = "complete.obs")  # use "complete.obs" to handle missing values if needed
+
+# Melt the correlation matrix into long format
+melted_cor_matrix <- melt(cor_matrix)
+
+# Create the heatmap
+ggplot(data = melted_cor_matrix, aes(Var1, Var2, fill = value)) +
+  geom_tile(color = "white") +  # Use geom_tile to create the heatmap tiles
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1,1), space = "Lab", name="Pearson\nCorrelation") +
+  theme_minimal() +  # Use a minimal theme
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, size = 12, hjust = 1),  # Adjust text angle for x axis labels
+        axis.text.y = element_text(size = 12)) +  # Adjust text size for y axis labels
+  labs(x = '', y = '') +  # Remove axis labels if desired
+  geom_text(aes(label = sprintf("%.2f", value)), size = 3, color = "black")  # Add correlation coefficients on the tiles
+```
+
+There are some important correlations to be noted:
+
+1\. salary_usd with 66% positive correlation with average monthly hours, 58% with tenure and 54% with number_project
+
+2\. left and satisfaction_level: -35% negative correlation
+
+3\. average_monthy_hours and number_project : 33.1% correlated
+
+4\. number_project and last_evaluation: 27% correlated
+
+5\. average_monthly_hours and last_evaluation: 26% correlated
+
+\- Tenure: The correlation of 0.14 indicates that there is a weak tendency for people that have been with the company for a long time to leave.
+
+\- Satisfaction level: The negative correlation of -0.38 indicates that less satisfied employees are more likely to leave. However, this is not a very strong inverse correlation.
+
+## Plotting the means alonside boxplots
+
+```{r warning=FALSE}
+library(ggplot2)
+
+variables_to_plot <- c('satisfaction_level', 'last_evaluation', 'number_projects', 'average_monthly_hours', 'tenure', 'salary_usd')
+
+# Loop through the variables and print individual plots with titles
+for (var in variables_to_plot) {
+  # Check if the variable exists in the dataframe
+  if (var %in% names(data)) {
+    p <- ggplot(data, aes_string(x = 'left', y = var)) +
+      geom_boxplot(aes(fill = left)) +
+      stat_summary(fun = mean, geom = "point", shape = 23, size = 6, color = "blue") +
+      stat_summary(fun = median, geom = "line", aes(group = left), color = "pink", linetype = "solid", linewidth = 1) +
+      labs(y = var, x = "", title = paste("Boxplot of", var, "by Left Status")) +
+      theme_minimal() +
+      theme(axis.title.y = element_blank())
+    
+    print(p)
+  } else {
+    message("Variable '", var, "' not found in the dataframe.")
+  }
+}
+
+```
+
+## Are the differences in the means significant?
+
+```{r}
+data$left <- factor(data$left)
+data$number_project <- factor(data$number_project)
+data$tenure <- factor(data$tenure)
+
+# Ensure that all variables in 'variables_to_plot' are numeric
+numeric_vars <- sapply(data, is.numeric)
+variables_to_plot <- variables_to_plot[variables_to_plot %in% names(data[numeric_vars])]
+
+# Initialize an empty list to store the test results
+results <- list()
+
+# Set the significance level
+alpha <- 0.05
+
+# Loop through the numeric variables and perform t-tests
+for (var in variables_to_plot) {
+  # Extract the groups
+  group1 <- data[data$left == levels(data$left)[1], var]
+  group2 <- data[data$left == levels(data$left)[2], var]
+  
+  # Check if there are enough non-NA values
+  if (sum(!is.na(group1)) > 1 && sum(!is.na(group2)) > 1) {
+    # Perform a t-test
+    test <- t.test(group1, group2, na.action = na.exclude)
+
+    # Interpretation of the result
+    significant <- test$p.value < alpha
+    interpretation <- if (significant) "Reject H0: Significant difference" else "Fail to reject H0: No significant difference"
+
+    # Ensure we are extracting single values for each element
+    p_value <- as.numeric(test$p.value)
+    mean_group1 <- mean(group1, na.rm = TRUE)
+    mean_group2 <- mean(group2, na.rm = TRUE)
+    t_statistic <- as.numeric(test$statistic)
+
+    # Store the test results
+    results[[var]] <- c(
+      p_value = p_value,
+      mean_group1 = mean_group1,
+      mean_group2 = mean_group2,
+      t_statistic = t_statistic,
+      interpretation = interpretation
+    )
+  } else {
+    # Store NA if there's not enough data
+    results[[var]] <- c(
+      p_value = NA,
+      mean_group1 = NA,
+      mean_group2 = NA,
+      t_statistic = NA,
+      interpretation = NA
+    )
+  }
+}
+
+# Convert the results to a data frame for easier viewing
+results_df <- as.data.frame(do.call(rbind, results))
+
+# Print the results dataframe
+print(results_df)
+
+```
+
+```{r}
+data$number_project <- factor(data$number_project)
+data$tenure <- factor(data$tenure)
+
+perform_chi_square_test <- function(data, var, group_var, alpha) {
+  # Create a contingency table
+  table <- table(data[[var]], data[[group_var]])
+
+  # Perform the chi-square test
+  test <- chisq.test(table)
+
+  # Output the hypotheses and the result
+  cat("Chi-square test for", var, "and", group_var, "\n")
+  cat("H0: There is no association between", var, "and", group_var, "\n")
+  cat("H1: There is an association between", var, "and", group_var, "\n\n")
+
+  cat("Chi-square statistic:", test$statistic, "\n")
+  cat("P-value:", test$p.value, "\n")
+  cat("Degrees of Freedom:", test$parameter, "\n")
+
+  # Check if the result is statistically significant
+  if (test$p.value < alpha) {
+    cat("Result: Reject H0. There is significant evidence at the", alpha, "level to suggest an association between", var, "and", group_var, ".\n\n")
+  } else {
+    cat("Result: Fail to reject H0. There is not enough evidence at the", alpha, "level to suggest an association between", var, "and", group_var, ".\n\n")
+  }
+}
+
+# Now, use this function for the specified variables and groups
+perform_chi_square_test(data, "number_project", "left", 0.05)
+perform_chi_square_test(data, "tenure", "left", 0.05)
+perform_chi_square_test(data, "work_accident", "left", 0.05)
+perform_chi_square_test(data, "department", "left", 0.05)
+
+```
+
+```{r}
+data$number_project <- factor(data$number_project)
+data$tenure <- factor(data$tenure)
+
+perform_chi_square_test <- function(data, var, group_var, alpha) {
+  # Create a contingency table
+  table <- table(data[[var]], data[[group_var]])
+
+  # Perform the chi-square test
+  test <- chisq.test(table)
+
+  # Output the hypotheses and the result
+  cat("Chi-square test for", var, "and", group_var, "\n")
+  cat("H0: There is no association between", var, "and", group_var, "\n")
+  cat("H1: There is an association between", var, "and", group_var, "\n\n")
+
+  cat("Chi-square statistic:", test$statistic, "\n")
+  cat("P-value:", test$p.value, "\n")
+  cat("Degrees of Freedom:", test$parameter, "\n")
+
+  # Check if the result is statistically significant
+  if (test$p.value < alpha) {
+    cat("Result: Reject H0. There is significant evidence at the", alpha, "level to suggest an association between", var, "and", group_var, ".\n\n")
+  } else {
+    cat("Result: Fail to reject H0. There is not enough evidence at the", alpha, "level to suggest an association between", var, "and", group_var, ".\n\n")
+  }
+}
+
+# Now, use this function for the specified variables and groups
+perform_chi_square_test(data, "number_project", "left", 0.05)
+perform_chi_square_test(data, "tenure", "left", 0.05)
+perform_chi_square_test(data, "work_accident", "left", 0.05)
+perform_chi_square_test(data, "department", "left", 0.05)
+
+```
+
+Comparing the characteristics of employees who left with those who stayed. Here are the key findings:
+
+\- \*\*Satisfaction Level:\*\* There is a statistically significant difference in the satisfaction levels of employees who left and those who stayed. Employees who left the company tend to have a lower satisfaction level.
+
+\- \*\*Tenure (years):\*\* There's a statistically significant difference in tenure between the groups. Employees who left have slightly higher tenure compared to those who stayed.
+
+\- \*\*Salary Level:\*\* There's a significant difference in the salary levels of the two groups.
+
+\- \*\*Average Monthly Hours\*\*: Employees who left tend to work more hours on average, and this difference is statistically significant.
+
+\- \*\*Number of Projects\*\*: Employees who left have a statistically significant difference in the number of projects they were involved in.
+
+\- \*\*Last Evaluation:\*\* While there's a slight difference in the last evaluation scores between the two groups, this difference is not statistically significant. This suggests that the quality of work (as measured by the last evaluation) might not be a strong predictor for an employee's decision to leave.
+
+```{r}
+# Define the overtime threshold
+overtime_threshold <- 176
+
+# Create the scatter plot
+p <- ggplot(data, aes(x = average_monthly_hours, y = satisfaction_level, color = left)) +
+  geom_point(alpha = 0.5) +  # Set transparency to see overlapping points
+  geom_vline(xintercept = overtime_threshold, linetype = "dashed", color = "red") +
+  scale_color_manual(values = c("0" = "lightblue", "1" = "orange")) +
+  labs(title = "Average Monthly Hours by Satisfaction Levels", color = "left") +
+  annotate("text", x = overtime_threshold, y = -0.05, label = "Overtime Threshold", hjust = 0, color = "red", angle = 90, vjust = 0.5)
+
+# Print the plot
+print(p)
+
+
+```
+
+```{r}
+data$left_status <- factor(data$left, levels = c(0, 1), labels = c("Retained", "Left"))
+
+# Filter out non-numeric variables to avoid issues with KDE plots
+numeric_vars <- sapply(data, is.numeric)
+numeric_vars_names <- names(data)[numeric_vars]
+
+# Loop through the numeric variables and create KDE plots
+for (var in numeric_vars_names) {
+  # Skip the 'left' variable
+  if (var != "left_status" && var!= "left") {
+    p <- ggplot(data, aes_string(x = var, fill = 'left_status')) +
+      geom_density(alpha = 0.5) +
+      scale_fill_manual(values = c("Retained" = "lightblue", "left_status" = "orange")) +
+      labs(title = paste("KDE Plot of", var, "vs. Attrition"), x = var, y = "Density", fill = "Attrition") +
+      theme_minimal()
+    
+    # Print the plot
+    print(p)
+  }
+}
+
+data <-select(data, -left_status)
+
+```
+
+# Modelling
+
+**Simple Linear Regression**
+
+```{r}
+# Simple Linear Regression
+lm_simple <- lm(salary_usd ~ satisfaction_level, data = data)
+summary(lm_simple)
+
+```
+
+**R-squared (0.0104)**:
+
+This value indicates that only about 1.04% of the variability in **`salary_usd`** can be explained by **`satisfaction_level`**. This is a very low value, suggesting that **`satisfaction_level`** alone does not explain much of the variance in salaries, and other variables might also be important.
+
+**F-Statistic (157.2)**:
+
+This tests whether there is a relationship between the response and the predictors. The very low p-value (\< 2.2e-16) indicates that the model is statistically significant, but given the low R-squared, it's not necessarily meaningful or useful.
+
+## Multiple Linear Regression
+
+```{r}
+# Multiple Linear Regression
+lm_multiple <- lm(salary_usd ~ satisfaction_level + number_project + tenure, data = data)
+summary(lm_multiple)
+
+```
+
+**R-squared (0.5269)**:
+
+This value indicates that approximately 52.69% of the variability in **`salary_usd`** is explained by the model. This is a moderate amount, suggesting the model has a fair explanatory power but there is still a substantial amount of variability unexplained.\
+Linear regression for predicting salary
+
+**F-statistic (1280)**:
+
+The F-statistic and its associated p-value (\< 2.2e-16) indicate that the model is statistically significant. This means that there is a statistically significant association of the predictors with **`salary_usd`**.
+
+The model suggests that both the number of projects and tenure are positively associated with salary, with more projects and longer tenure leading to higher salaries. Satisfaction level also has a positive effect but is less impactful compared to the number of projects and tenure. T
+
+```{r}
+library(glmnet)
+
+perform_lasso_selection <- function(data, target, alpha = 1) {
+  # Remove rows with NAs in the target or any predictor
+  data <- na.omit(data)
+
+  # Ensure target is not in predictors
+  predictors <- data[, !names(data) %in% target]
+  
+  # Convert factors to dummy variables
+  predictors <- data.frame(model.matrix(~ . - 1, data = predictors))
+
+  # Prepare the target variable
+  y <- data[[target]]
+
+  # Check if the number of observations match
+  if (nrow(predictors) != length(y)) {
+    stop("Number of observations in y does not match the number of rows in x")
+  }
+
+  # Fit the Lasso model
+  lasso_model <- cv.glmnet(as.matrix(predictors), y, alpha = alpha, family = "gaussian")
+
+  # Extract the coefficients at the optimal lambda
+  optimal_lambda <- lasso_model$lambda.min
+  lasso_coefs <- as.matrix(coef(lasso_model, s = optimal_lambda))
+
+  # Create a named vector for non-zero coefficients
+  nonzero_coefs <- lasso_coefs[lasso_coefs[,1] != 0, 1, drop = FALSE]
+  coef_names <- rownames(lasso_coefs)[lasso_coefs[, 1] != 0]
+  named_nonzero_coefs <- setNames(nonzero_coefs, coef_names)
+
+  # Return the named non-zero coefficients
+  return(named_nonzero_coefs)
+}
+
+# Example usage
+significant_vars <- perform_lasso_selection(data, "salary_usd")
+print(significant_vars)
+
+
+```
+
+```{r}
+# Assuming the perform_lasso_selection function is already defined and available 
+modelling_data <- data %>% select(number_project, average_monthly_hours, tenure, work_accident, salary_usd)
+
+# 4. Model Building:
+model <- lm(salary_usd ~ ., data = modelling_data)
+
+# 5. Diagnostic Plots:
+par(mfrow = c(2, 2))
+plot(model)
+
+# 6. Model Evaluation:
+summary(model)
+```
+
+1.  **Residuals vs Fitted**: This plot checks the assumption of linearity and homoscedasticity (equal variances). Ideally, there would be a random scatter of points. In this case, there appears to be a pattern, with residuals fanning out as the fitted values increase, indicating potential heteroscedasticity.
+
+2.  **Normal Q-Q Plot**: This plot checks if the residuals are normally distributed. Points following the straight line indicate normality. The plot shows some deviation at both ends, suggesting that residuals may not be perfectly normal, especially for extreme values.
+
+3.  **Scale-Location (or Spread-Location) Plot**: This plot also checks for homoscedasticity. A horizontal line with randomly spread points would indicate homoscedasticity. The plot suggests that variances of residuals are not consistent across the range of fitted values.
+
+4.  **Residuals vs Leverage**: This plot helps to identify influential cases (outliers). You don't want to see points in the top-right or bottom-right corners. Points outside the Cook's distance lines can be influential. The plot indicates there are a few potential outliers, but they don't seem to be highly influential since they are within the Cook's distance boundary.
+
+-   **Coefficients**: The coefficients tell the estimated change in the target variable (which seems to be salary) for one unit change in the predictor variable, holding other variables constant. For example, **`number_project3`** has a coefficient of 1,014, suggesting that having 3 projects is associated with an increase of 1,014 in the salary unit compared to the baseline (probably 1 or 2 projects).
+
+-   **Significance Codes**: The asterisks indicate the significance of the predictor variables. Variables with more asterisks are more statistically significant. For example, **`number_project3`** is highly significant in predicting salary (indicated by **`***`**).
+
+-   **Residual Standard Error**: This is the estimate of the standard deviation of the residuals. The lower the RSE, the better the model fits the data. In this case, it's 2504.
+
+-   **Multiple R-squared**: This indicates the proportion of variance in the dependent variable that can be explained by the independent variables. Here, it's 0.7335, which means around 73.35% of the variance in salary can be explained by the model.
+
+-   **Adjusted R-squared**: This is the R-squared adjusted for the number of predictors in the model. It's 0.7333, which is quite close to the R-squared, suggesting not many extraneous variables are in the model.
+
+-   **F-statistic**: This tests whether at least one predictor variable has a non-zero coefficient. A significant F-statistic (with a p-value \< 2.2e-16) indicates that the model is a better fit than an intercept-only model.
+
+**Tree based classifiers for predicting attrition**
+
+```{r warning=FALSE}
+library(tidymodels)
+library(yardstick)
+
+set.seed(123)
+split <- initial_split(data, prop = 0.8, strata = left)
+train_data <- training(split)
+test_data <- testing(split)
+
+# Define the recipe
+rec <- recipe(left ~ ., data = train_data) %>%
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors())
+
+# Model specifications with a fixed mtry value for random forest
+# Random Forest
+rf_spec <- rand_forest(mtry = 3, trees = 300) %>%
+  set_mode("classification") %>%
+  set_engine("randomForest")
+
+# XGBoost
+xgb_spec <- boost_tree(trees = 300) %>%
+  set_mode("classification") %>%
+  set_engine("xgboost", nthread = parallel::detectCores(logical = FALSE))
+
+
+# Create cross-validation folds
+cv_folds <- vfold_cv(train_data, v = 2, strata = left)
+
+# Define metric set for resampling
+metrics_set <- metric_set(roc_auc, yardstick::accuracy, precision, recall, f_meas)
+
+# Fit models and collect metrics
+models <- list(Random_Forest = rf_spec, XGBoost = xgb_spec)
+model_results <- map(models, ~ workflow() %>%
+  add_recipe(rec) %>%
+  add_model(.x) %>%
+  fit_resamples(cv_folds, metrics = metrics_set)
+)
+
+# Extract and compare metrics
+results <- map_dfr(model_results, collect_metrics, .id = "model")
+
+best_model_name <- results %>%
+  filter(.metric == "f_meas") %>%
+  arrange(desc(mean)) %>%
+  dplyr::slice(1) %>%
+  pull(model)
+
+# Print the best model's name
+cat("The best model based on F1 score is:", best_model_name, "\n")
+
+# Refit the best model on the entire training set
+best_workflow <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(models[[best_model_name]]) %>%
+  fit(data = train_data)
+
+# Predict on test data
+predictions <- predict(best_workflow, test_data, type = "prob")
+
+# Add the true outcome to the predictions
+predictions <- predictions %>% bind_cols(test_data %>% select(left))
+
+# Calculate performance metrics
+threshold <- 0.5
+
+predictions <- predictions %>%
+  mutate(.pred_class = if_else(.pred_1 >= threshold, "1", "0"))
+
+# Convert .pred_class to a factor if necessary
+predictions$.pred_class <- as.factor(predictions$.pred_class)
+
+# Now calculate the performance metrics
+perf_metrics <- predictions %>%
+  metrics(truth = left, estimate = .pred_class)
+
+# Print performance metrics
+print(perf_metrics)
+
+
+# Create a confusion matrix
+conf_mat <- predictions %>%
+  conf_mat(truth = left, estimate = .pred_class)
+
+# Print the confusion matrix
+print(conf_mat)
+
+```
+
+1.  **Confusion Matrix**:
+
+    -   **True Negatives (TN)**: 2266 instances were correctly predicted as class '0' (i.e., the employee did not leave).
+
+    -   **False Positives (FP)**: 33 instances were incorrectly predicted as class '1' (i.e., the employee left) when they actually did not.
+
+    -   **False Negatives (FN)**: 13 instances were incorrectly predicted as class '0' (i.e., the employee did not leave) when they actually did.
+
+    -   **True Positives (TP)**: 680 instances were correctly predicted as class '1' (i.e., the employee left).
+
+2.  **Performance Metrics**:
+
+    -   **Accuracy (0.9846257)**: Approximately 98.46% of the predictions made by the model were correct. This is an extremely high accuracy rate and might suggest that the model is performing very well.
+
+    -   **Kappa Statistic (0.9572377)**: The kappa statistic is also very high, suggesting that the agreement between the model's predictions and the actual values is much better than what would be expected by chance. A kappa value closer to 1 indicates excellent agreement, and in this case, 0.957 is indicative of very strong agreement.
